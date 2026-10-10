@@ -1,0 +1,11 @@
+name: ai-news
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - flask>=3.0
+  - requests>=2.31
+  - pip
+  - pip:
+      - openai>=1.30.0
+      - python-dotenv>=1.0.0
