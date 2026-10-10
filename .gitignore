@@ -1,0 +1,42 @@
+# 密钥 / 环境变量
+.env
+*.env
+secrets.json
+*.key
+*.pem
+
+# 数据库
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+workspace/data/
+
+# Agent 运行时产物
+workspace/briefings/*.md
+workspace/outbox/*
+workspace/cache/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+logs.txt
