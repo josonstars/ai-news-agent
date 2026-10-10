@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>每日 AI 新闻助手</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; max-width: 1000px; margin: 30px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 22px; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+  label { display: block; font-size: 13px; color: #555; margin-top: 8px; }
+  input[type=text], input[type=email], textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+  textarea { min-height: 60px; }
+  button { margin-top: 12px; padding: 8px 18px; border: none; background: #2563eb; color: #fff; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  button:hover { background: #1d4ed8; }
+  button.secondary { background: #6b7280; }
+  pre { background: #f6f8fa; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+  .msg { font-size: 13px; color: #059669; margin-top: 8px; }
+  .err { color: #dc2626; }
+  #historyList li { cursor: pointer; padding: 6px 0; color: #2563eb; }
+  #historyList li:hover { text-decoration: underline; }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  .hint { font-size: 12px; color: #888; margin-top: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+  th { background: #f3f4f6; }
+</style>
+</head>
+<body>
+
+<h1>📰 每日 AI 新闻助手</h1>
+
+<div class="card">
+  <h3>① 用户身份 & 订阅偏好</h3>
+  <div class="row">
+    <div>
+      <label>user_id（必填）</label>
+      <input type="text" id="user_id" value="alice">
+    </div>
+    <div>
+      <label>邮箱（可选）</label>
+      <input type="email" id="email" placeholder="alice@example.com">
+    </div>
+  </div>
+
+  <label>关注话题（每行一个）</label>
+  <textarea id="topics">大模型
+AI Agent
+开源模型</textarea>
+
+  <label>关键词（每行一个）</label>
+  <textarea id="keywords">OpenAI
+Anthropic
+Llama
+Claude
+RAG</textarea>
+
+  <label>排除关键词（每行一个）</label>
+  <textarea id="exclude">加密货币</textarea>
+
+  <div class="row">
+    <div>
+      <label>推送渠道</label>
+      <input type="text" id="push_channel" value="outbox">
+    </div>
+    <div>
+      <label>推送时间</label>
+      <input type="text" id="push_time" value="08:30">
+    </div>
+  </div>
+
+  <button onclick="savePrefs()">保存偏好</button>
+  <button class="secondary" onclick="loadPrefs()">读取当前偏好</button>
+  <div class="msg" id="prefsMsg"></div>
+</div>
+
+<div class="card">
+  <h3>② 立即生成简报（Agent 自主运行）</h3>
+  <button onclick="runAgent()">🚀 让 Agent 开始工作</button>
+  <div class="hint">Agent 会自主决定顺序：读偏好 → 搜新闻 → 去重 → 写简报 → 入库 → 推送。</div>
+  <div class="msg" id="runMsg"></div>
+  <pre id="runResult" style="display:none"></pre>
+</div>
+
+<div class="card">
+  <h3>③ 最近一次运行的工具调用序列</h3>
+  <button class="secondary" onclick="loadToolCalls()">刷新</button>
+  <div class="hint">这张表就是"工具调用顺序由 LLM 决定"的直接证据。</div>
+  <table id="toolCallTable" style="display:none">
+    <thead><tr><th>Step</th><th>工具</th><th>参数</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="msg" id="toolMsg"></div>
+</div>
+
+<div class="card">
+  <h3>④ 历史简报</h3>
+  <button class="secondary" onclick="loadHistory()">刷新历史</button>
+  <ul id="historyList" style="padding-left: 20px;"></ul>
+  <pre id="historyContent" style="display:none"></pre>
+</div>
+
+<script>
+function uid() { return document.getElementById("user_id").value.trim(); }
+function lines(id) {
+  return document.getElementById(id).value.split("\n").map(s => s.trim()).filter(Boolean);
+}
+
+async function savePrefs() {
+  const body = {
+    user_id: uid(),
+    email: document.getElementById("email").value.trim(),
+    topics: lines("topics"),
+    keywords: lines("keywords"),
+    exclude: lines("exclude"),
+    push_channel: document.getElementById("push_channel").value.trim(),
+    push_time: document.getElementById("push_time").value.trim(),
+  };
+  const msg = document.getElementById("prefsMsg");
+  msg.className = "msg";
+  if (!body.user_id) { msg.textContent = "请填写 user_id"; msg.className = "msg err"; return; }
+  const r = await fetch("/api/prefs", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  });
+  const j = await r.json();
+  msg.textContent = j.msg || (j.ok ? "已保存" : "保存失败");
+  msg.className = j.ok ? "msg" : "msg err";
+}
+
+async function loadPrefs() {
+  if (!uid()) return;
+  const r = await fetch(`/api/prefs/${uid()}`);
+  if (!r.ok) { document.getElementById("prefsMsg").textContent = "未找到该用户偏好"; return; }
+  const p = (await r.json()).prefs;
+  document.getElementById("email").value = p.email || "";
+  document.getElementById("topics").value = (p.topics || []).join("\n");
+  document.getElementById("keywords").value = (p.keywords || []).join("\n");
+  document.getElementById("exclude").value = (p.exclude || []).join("\n");
+  document.getElementById("push_channel").value = p.push_channel || "outbox";
+  document.getElementById("push_time").value = p.push_time || "08:30";
+  document.getElementById("prefsMsg").textContent = "已读取";
+}
+
+async function runAgent() {
+  if (!uid()) return;
+  const msg = document.getElementById("runMsg");
+  const out = document.getElementById("runResult");
+  msg.className = "msg";
+  msg.textContent = "Agent 运行中，请稍候（30~90 秒）...";
+  out.style.display = "none";
+  try {
+    const r = await fetch("/api/run", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ user_id: uid() }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      msg.textContent = "✅ 完成";
+      out.style.display = "block";
+      out.textContent = j.result;
+      loadHistory();
+      loadToolCalls();
+    } else {
+      msg.className = "msg err"; msg.textContent = "❌ " + (j.msg || "失败");
+    }
+  } catch (e) {
+    msg.className = "msg err"; msg.textContent = "请求异常：" + e;
+  }
+}
+
+async function loadToolCalls() {
+  if (!uid()) return;
+  const r = await fetch(`/api/tool_calls/${uid()}`);
+  const j = await r.json();
+  const tbl = document.getElementById("toolCallTable");
+  const tbody = tbl.querySelector("tbody");
+  tbody.innerHTML = "";
+  if (!j.items || j.items.length === 0) {
+    document.getElementById("toolMsg").textContent = "还没有工具调用记录，先点上面的生成。";
+    tbl.style.display = "none";
+    return;
+  }
+  document.getElementById("toolMsg").textContent = `run_id = ${j.run_id}`;
+  j.items.forEach(it => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${it.step}</td><td><code>${it.tool_name}</code></td><td><code>${(it.arguments || "").slice(0, 120)}</code></td>`;
+    tbody.appendChild(tr);
+  });
+  tbl.style.display = "table";
+}
+
+async function loadHistory() {
+  if (!uid()) return;
+  const r = await fetch(`/api/history/${uid()}`);
+  const j = await r.json();
+  const ul = document.getElementById("historyList");
+  ul.innerHTML = "";
+  if (!j.items || j.items.length === 0) {
+    ul.innerHTML = "<li style='color:#888;cursor:default'>暂无历史简报</li>";
+    return;
+  }
+  j.items.forEach(item => {
+    const li = document.createElement("li");
+    li.textContent = item.brief_date ? `${item.brief_date}  ${item.title || item.name}` : item.name;
+    li.onclick = () => {
+      const pre = document.getElementById("historyContent");
+      pre.style.display = "block";
+      pre.textContent = item.content || "(空)";
+    };
+    ul.appendChild(li);
+  });
+}
+</script>
+</body>
+</html>
